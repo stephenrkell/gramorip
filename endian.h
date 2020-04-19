@@ -4,8 +4,10 @@
 #ifndef _GETBIG
 #define _GETBIG 1
 
+#include <sys/types.h>
+
 extern u_short SwapTwoBytes (u_short);
-extern u_long SwapFourBytes (u_long);
+extern u_int32_t SwapFourBytes (u_int32_t);
 extern sample_t SwapSample (sample_t);
 
 /* macro to swap endianness of values in a sample_t with */

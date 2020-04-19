@@ -24,10 +24,10 @@ SwapTwo (short w)
   return (tmp);
 }
 
-u_long
-SwapFourBytes (u_long dw)
+u_int32_t
+SwapFourBytes (u_int32_t dw)
 {
-  register u_long tmp;
+  register u_int32_t tmp;
   tmp = (dw & 0x000000FF);
   tmp = ((dw & 0x0000FF00) >> 0x08) | (tmp << 0x08);
   tmp = ((dw & 0x00FF0000) >> 0x10) | (tmp << 0x08);

@@ -30,6 +30,30 @@
 #include <machine/soundcard.h>
 #endif
 
+/* Needed for BYTE_ORDER and BIG/LITTLE_ENDIAN macros. */
+#ifndef _BSD_SOURCE
+# define _BSD_SOURCE
+# include <endian.h>
+# undef  _BSD_SOURCE
+#else
+# include <endian.h>
+#endif
+
+#include <sys/types.h>
+#include <byteswap.h>
+
+/* Adapted from the byteorder macros in the Linux kernel. */
+#if BYTE_ORDER == LITTLE_ENDIAN
+#define cpu_to_le32(x) (x)
+#define cpu_to_le16(x) (x)
+#else
+#define cpu_to_le32(x) bswap_32((x))
+#define cpu_to_le16(x) bswap_16((x))
+#endif
+
+#define le32_to_cpu(x)	cpu_to_le32((x))
+#define le16_to_cpu(x)	cpu_to_le16((x))
+
 #include "fmtheaders.h"
 
 #include "../yesnowindow.h"
@@ -287,23 +311,26 @@ int main(int argc, char *argv[])
 				char *data = "data";
 
 				memcpy(&(header.main_chunk), riff, 4);
-				header.length = sizeof(wavhead) - 8 + bcount;
+				header.length = cpu_to_le32(sizeof(wavhead)
+						- 8 + bcount);
 				memcpy(&(header.chunk_type), wave, 4);
 
 				memcpy(&(header.sub_chunk), fmt, 4);
-				header.sc_len = 16;
-				header.format = 1;
-				header.modus = stereo + 1;
-				header.sample_fq = speed;
-				header.byte_p_sec = ((bits > 8)? 2:1)*(stereo+1)*speed;
+				header.sc_len = cpu_to_le32(16);
+				header.format = cpu_to_le16(1);
+				header.modus = cpu_to_le16(stereo + 1);
+				header.sample_fq = cpu_to_le32(speed);
+				header.byte_p_sec = cpu_to_le32(((bits > 8)?
+						2:1)*(stereo+1)*speed);
 /* Correction by J.A. Bezemer: */
-				header.byte_p_spl = ((bits > 8)? 2:1)*(stereo+1);
+				header.byte_p_spl = cpu_to_le16(((bits > 8)?
+						2:1)*(stereo+1));
 			/* was: header.byte_p_spl = (bits > 8)? 2:1; */
 
-				header.bit_p_spl = bits;
+				header.bit_p_spl = cpu_to_le16(bits);
 
 				memcpy(&(header.data_chunk), data, 4);
-				header.data_length = bcount;
+				header.data_length = cpu_to_le32(bcount);
 				write(thefd, &header, sizeof(header));
 			}
 		case F_RAW:
@@ -333,9 +360,9 @@ int main(int argc, char *argv[])
 
 				for (i=0;i<20;i++)
 					header.Magic[i] = VOC_MAGIC[i];
-				header.BlockOffset = 0x1a;
-				header.Version = 0x0114;
-				header.IDCode = 0x111F;
+				header.BlockOffset = cpu_to_le16(0x1a);
+				header.Version = cpu_to_le16(0x0114);
+				header.IDCode = cpu_to_le16(0x111F);
 				write(thefd, &header, sizeof(vochead));
 
 				snd_parm(speed, bits, stereo);
@@ -346,10 +373,10 @@ int main(int argc, char *argv[])
 				ablk.BlockLen[0] = (i + 12) & 0xFF;
 				ablk.BlockLen[1] = ((i + 12) >> 8) & 0xFF;
 				ablk.BlockLen[2] = ((i + 12) >> 16) & 0xFF;
-				bblk.SamplesPerSec = speed;
+				bblk.SamplesPerSec = cpu_to_le32(speed);
 				bblk.BitsPerSample = bits;
 				bblk.Channels = stereo + 1;
-				bblk.Format = (bits == 8)? 0 : 4;
+				bblk.Format = cpu_to_le16((bits == 8)? 0 : 4);
 				write(thefd, &ablk, sizeof(ablk));
 				write(thefd, &bblk, sizeof(bblk));
 				shmrec(thefd, i, 1);
@@ -474,6 +501,17 @@ long bcount = 0, bjump = 0;
 
     memcpy((void*)&wavhd, (void*)hd_buf, 20);
     count = read(thefd, ((char*)&wavhd)+20, sizeof(wavhd) - 20);
+
+    wavhd.length = le32_to_cpu(wavhd.length);
+    wavhd.sc_len = le32_to_cpu(wavhd.sc_len);
+    wavhd.format = le16_to_cpu(wavhd.format);
+    wavhd.modus = le16_to_cpu(wavhd.modus);
+    wavhd.sample_fq = le32_to_cpu(wavhd.sample_fq);
+    wavhd.byte_p_sec = le32_to_cpu(wavhd.byte_p_sec);
+    wavhd.byte_p_spl = le16_to_cpu(wavhd.byte_p_spl);
+    wavhd.bit_p_spl = le16_to_cpu(wavhd.bit_p_spl);
+    wavhd.data_length = le32_to_cpu(wavhd.data_length);
+
     if(wavhd.format != 1) Die("Input is not a PCM WAV file");
 #ifndef LP2CD
     if (! (mods&MSPEED))
@@ -516,6 +554,11 @@ void playvoc(int thefd, char hd_buf[20])
     fprintf(stderr, "Playing Creative Labs Voice file ...\n");
     memcpy((void*)&vochd, (void*)hd_buf, 20);
     count = read(thefd, ((char*)&vochd)+20, sizeof(vochd) - 20);
+
+    vochd.BlockOffset = le16_to_cpu(vochd.BlockOffset);
+    vochd.Version = le16_to_cpu(vochd.Version);
+    vochd.IDCode = le16_to_cpu(vochd.IDCode);
+    
     fprintf(stderr, "Format version %d.%d\n", vochd.Version>>8,
 	vochd.Version&0xFF);
     if (vochd.IDCode != (~vochd.Version+0x1234))
@@ -564,6 +607,9 @@ void playvoc(int thefd, char hd_buf[20])
 	{
 	blockT8 tblock;
 	read(thefd, (char*)&tblock, sizeof(tblock));
+
+	tblock.TimeConstant = le16_to_cpu(tblock.TimeConstant);
+	
 	if(tblock.PackMethod != 0) Die("Non PCM VOC block");
 	speed = 256000000/(65536 - tblock.TimeConstant);
 	bits = 8;
@@ -576,6 +622,10 @@ void playvoc(int thefd, char hd_buf[20])
 	{
 	blockT9 tblock;
 	read(thefd, (char*)&tblock, sizeof(tblock));
+
+	tblock.SamplesPerSec = le32_to_cpu(tblock.SamplesPerSec);
+	tblock.Format = le16_to_cpu(tblock.Format);
+	
 	if(tblock.Format != 0 && tblock.Format != 4)
 	    Die("Non PCM VOC block");
 	speed = tblock.SamplesPerSec;

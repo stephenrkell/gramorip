@@ -66,6 +66,9 @@ void snd_parm(int speed, int bits, int stereo)
 	sync_audio();
 
 	/* Set the sample speed, size and stereoness */
+	/* We only use values of 8 and 16 for bits. This implies
+	 * unsigned data for 8 bits, and little-endian signed for 16 bits.
+	 */
 	if (ioctl(audio, SNDCTL_DSP_SAMPLESIZE, &bits) < 0)
 	    ErrDie(AUDIO);
 	if (ioctl(audio, SNDCTL_DSP_STEREO, &stereo) < 0)
