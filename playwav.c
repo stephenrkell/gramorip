@@ -32,23 +32,47 @@
 #include <curses.h>
 #endif
 
+#define BPLAYCMD "/usr/lib/gramofile/bplay_gramo"
 
 void
 playwav_playit (char *filename, int usebeginendtime, double begintime,
 		double endtime)
 {
-  char shellcmd[500];
-
+  char shellcmd[500], *tmp;
+  int len, ret;
+  
   switch (checkfile (filename))
     {
     case FILE_EXISTS:
-
+	    
+      tmp = shellcmd;
+      len = 500;
+retry:
       if (usebeginendtime)
-	sprintf (shellcmd, "bplay_gramo -S -s 44100 -b 16 -J %ld -T %ld \"%s\"",
+	ret = snprintf (tmp, len,
+	          BPLAYCMD " -S -s 44100 -b 16 -J %ld -T %ld \"%s\"",
 		 (long) (begintime * 44100),
 		 (long) ((endtime - begintime) * 44100), filename);
       else
-	sprintf (shellcmd, "bplay_gramo -S -s 44100 -b 16 \"%s\"", filename);
+	ret = snprintf (tmp, len,
+	                BPLAYCMD " -S -s 44100 -b 16 \"%s\"", filename);
+
+      if (ret > len)
+        {
+	   tmp = alloca(ret);
+	   len = ret;
+	   if (tmp)
+	     goto retry;
+           error_window ("The system ran out of memory");
+	   break;
+	}
+	   
+      if (ret == -1)
+	{
+	   error_window ("Cannot handle file names this long. Sorry.");
+	   break;
+	}
+
       /* defaults for raw files (but no -r, so .wav's supply their own
          parameters) - you can even listen to executables in CD quality (: */
 

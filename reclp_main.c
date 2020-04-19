@@ -18,20 +18,39 @@
 #include <curses.h>
 #endif
 
+#define BRECCMD "/usr/lib/gramofile/brec_gramo"
 
 void
 record_from_lp (char *startdir)
 {
   char filename[250];
-  char shellcmd[500];
+  char shellcmd[500], *tmp;
+  int ret, len;
 
   if (!record_from_lp_get_filename (startdir, filename))
     return;
 
   def_prog_mode ();		/* save terminal state */
 
-  sprintf (shellcmd, "brec_gramo -S -s 44100 -b 16 -t 6000 -w \"%s\"",
-	   filename);
+  tmp = shellcmd;
+  len = 500;
+
+retry:  
+  ret = snprintf (tmp, 500, BRECCMD " -S -s 44100 -b 16 -t 6000 -w \"%s\"",
+	          filename);
+
+  if (ret > len)
+    {
+       tmp = alloca(ret);
+       len = ret;
+       if (tmp)
+         goto retry;
+       return;
+    }
+
+  if (ret == -1)
+    return;
+  
   system (shellcmd);
 
   reset_prog_mode ();		/* reset terminal state */
