@@ -3,6 +3,7 @@
 wav="$1"
 
 mplayer=${MPLAYER:-mplayer}
+mplayer_playback_opts=${MPLAYER_OPTS:-}
 
 tty=`tty`
 
@@ -40,7 +41,22 @@ play_ms_start_duration () {
     #echo "Doing: " ${mplayer} -really-quiet -ss $( echo $start_ms | ms_to_s ) \
     #  -endpos $( echo $duration_ms | ms_to_s ) \
     #  "$wav" 1>&2
-    ${mplayer} -really-quiet -ss $( echo $start_ms | ms_to_s ) \
+    "${mplayer}" ${mplayer_playback_opts} -really-quiet -ss $( echo $start_ms | ms_to_s ) \
+      -endpos $( echo $duration_ms | ms_to_s ) \
+      "$wav" <"$tty"
+}
+
+# don't use MPLAYER in case it has conflicting '-ao' options
+save_ms_start_duration () {
+    destfile="$1"
+    start_ms="$2"
+    duration_ms="$3"
+    echo "Doing: " mplayer -really-quiet -ss $( echo $start_ms | ms_to_s ) \
+      -ao pcm:file="$destfile" \
+      -endpos $( echo $duration_ms | ms_to_s ) \
+      "$wav" 1>&2
+    "$mplayer" -really-quiet -ss $( echo $start_ms | ms_to_s ) \
+      -ao pcm:file="$destfile" \
       -endpos $( echo $duration_ms | ms_to_s ) \
       "$wav" <"$tty"
 }
@@ -104,22 +120,89 @@ for n in `seq 1 $count`; do
     else
         sep=$'\n'
     fi
-    program="${program}${sep}p${n}+5 Playing $n from start, 5s; OK?"
+    # Prompts shouldn't mention tracks by name, as w don't try to rewrite them
+    # when track numbers change. Instead we shell-expand them, so just say '$tgt'
+    program="${program}${sep}p${n}+5 Playing "'$tgt'" from start, 5s; OK?"
     sep=$'\n'
-    program="${program}${sep}p${n}-5 Playing $n to end, 5s; OK?"
+    program="${program}${sep}p${n}-5 Playing "'$tgt'" to end, 5s; OK?"
 done
-program="${program}${sep}w"
+program="${program}${sep}w Writing the output .wav files; OK?"
 
 #echo "Program is:" 1>&2
 #echo "$program" 1>&2
 
-parse () {
-    input="$1"
+parse_into () {
+    local input="$1"
+    # echo "parsing: $input (into vars: $2 $3 $4 $5)" 1>&2
     regex="([a-z])([0-9]+)?([-\+])?([0-9]+)?"
-    ins="$( echo "$input" | sed -rn "/$regex/ {s//\1/;p}" )"
-    tgt="$( echo "$input" | sed -rn "/$regex/ {s//\2/;p}" )"
-    dir="$( echo "$input" | sed -rn "/$regex/ {s//\3/;p}" )"
-    arg="$( echo "$input" | sed -rn "/$regex/ {s//\4/;p}" )"
+    # FIXME: why does 'declare' not work here?
+    eval "${2}='$( echo "$input" | sed -rn "/$regex/ {s//\1/;p}" )'"
+    eval "${3}='$( echo "$input" | sed -rn "/$regex/ {s//\2/;p}" )'"
+    eval "${4}='$( echo "$input" | sed -rn "/$regex/ {s//\3/;p}" )'"
+    eval "${5}='$( echo "$input" | sed -rn "/$regex/ {s//\4/;p}" )'"
+}
+# "last target" is really "the current track", so initially 1
+last_tgt=1
+parse () {
+    parse_into "$1" ins tgt dir arg
+    # remember which track we're acting on
+    if [[ -n "$tgt" ]]; then last_tgt="$tgt"; fi
+}
+
+drop_prog_instr () {
+    local idx="$1"
+    for n in `seq $(( $idx + 1 )) $(( $proglen - 1 ))`; do
+        program_cmds[$(( $n - 1 ))]="${program_cmds[$n]}"
+        program_prompts[$(( $n - 1 ))]="${program_prompts[$n]}"
+    done
+    proglen=$(( $proglen - 1 ))
+    if [[ $cmdidx -ge $idx ]]; then
+        cmdidx=$(( $cmdidx - 1 ))
+        echo "cmdidx fixed up to $cmdidx" 1>&2
+    fi
+}
+
+drop_tgt () {
+    real_tgt=${tgt:-${last_tgt}}
+    # To drop a track, it means:
+    # - shuffle the starts and ends of later tracks back 1
+    # - delete any pending commands on the dropped track
+    # - in-place-rewrite any pending commands so that track numbers in them are rewritten
+    # The command stuff may be easier if the commands
+    # are kept in an array
+    # and we have a "program counter" that is the next-to-execute array index
+    for n in `seq $(( $real_tgt + 1 )) $count`; do
+        echo "We would shuffle back track $n by one"
+        starts[$(($n - 1))]=${starts[$n]}
+        ends[$(($n - 1))]=${ends[$n]}
+    done
+    starts[$count]=""
+    ends[$count]=""
+    # Now rewrite the program so that
+    # - any command whose target is n, for n > tgt, is renumbered
+    # - any command whose target is tgt is deleted,
+    #       and if cmdidx is >=
+    local pos=0
+    while ! [[ $pos -eq $proglen ]]; do
+        local cmd="${program_cmds[$pos]}"
+        parse_into "$cmd" this_ins this_tgt this_dir this_arg
+        if [[ $this_tgt -eq $real_tgt ]]; then
+            # we need to drop this instr
+            echo "Dropping instruction: $cmd" 1>&2
+            drop_prog_instr $pos
+            # ... and go back to the start of the program
+            pos=0
+            continue
+        elif [[ $this_tgt -gt $real_tgt ]]; then
+            # all track#s greater than tgt are now one less
+            echo "Rewriting instruction: $cmd" 1>&2
+            program_cmds[$pos]="${this_ins}$(($this_tgt - 1))${this_dir}${this_arg}"
+        fi
+        pos=$(( $pos + 1 ))
+    done
+    count=$(( $count - 1 ))
+    echo "We now have $count tracks"
+    print_state
 }
 
 eval_it () {
@@ -160,32 +243,29 @@ eval_it () {
         ;;
         ('d') # drop
             echo "Doing drop" 1>&2
-            # HOW can we easily do drop?
-            # We need to
-            # - shuffle the starts and ends of later tracks along
-            # - delete any pending commands on the dropped track
-            # - in-place-rewrite any pending commands so that track numbers in them are rewritten
-            # The command stuff may be easier if the commands
-            # are kept in an array
-            # and we have a "program counter" that is the next-to-execute array index
+            drop_tgt
         ;;
         ('n') # nudge
             echo "Doing nudge" 1>&2
             # nN-5 means move the end of track N back 5s
-            # i.e. also move the start of track N+1 back 5s
+            # i.e. also move the start of track N+1 back 5s ONLY IF they are abutting
             # nN+5 means move the start of track N forward 5s
-            # i.e. also move the end of track N-1 forward 5s
+            # i.e. also move the end of track N-1 forward 5s ONLY IF they are abutting
             case "$dir" in
                 ('-')
                     new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
+                    if [[ "${starts[$(($tgt +1))]}" == "${ends[$tgt]}" ]]; then
+                        starts[$(($tgt +1))]="$new_boundary"
+                    fi
                     ends[$tgt]="$new_boundary"
-                    starts[$(($tgt +1))]="$new_boundary"
                     print_state
                 ;;
                 ('+')
                     new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + ($arg * 1000) )) )"
+                    if [[ "$ends{[$(($tgt -1))]}" == "${starts[$tgt]}" ]]; then
+                        ends[$(($tgt -1))]="$new_boundary"
+                    fi
                     starts[$tgt]="$new_boundary"
-                    ends[$(($tgt -1))]="$new_boundary"
                     print_state
                 ;;
                 (*)
@@ -200,7 +280,12 @@ eval_it () {
         ;;
         ('w') # write out files
             echo "Doing write" 1>&2
-            # use mplayer -ao pcm
+            destdir="$( mktemp -d ./split-XXXXXX )" || (echo "Couldn't create output dir"; false) || exit 1
+            for n in `seq 1 $count`; do
+                save_ms_start_duration "${destdir}/track${n}.wav" \
+                    $(time_in_ms $(parse_time ${starts[$n]}) ) \
+                    $(( $(time_in_ms $(parse_time ${ends[$n]}) ) - $(time_in_ms $(parse_time ${starts[$n]}) ) )) 
+            done
         ;;
         (*)
             echo "Did not understand command $cmd: $resp"
@@ -209,10 +294,28 @@ eval_it () {
     esac
 }
 
+declare -a program_cmds
+declare -a program_prompts
+proglen=0
 while read cmd prompt; do
-    program_cmd="$cmd"
+    program_cmds[$proglen]="$cmd"
+    program_prompts[$proglen]="$prompt"
+    proglen=$(( $proglen + 1 ))
+done<<<"$program"
+
+cmdidx=0
+while true; do
+    # we might go multiple iterations without advancing
+    # the program position
     while true; do
-        echo -n "[$cmd] ${prompt} "
+        cmd="${program_cmds[$cmdidx]}"
+        program_cmd="$cmd"
+        prompt="${program_prompts[$cmdidx]}"
+        saved_cmdidx="$cmdidx"
+        parse "$program_cmd" # so that we have ${tgt} defined
+        echo -n "[$cmd] "
+        eval "echo -n \"${prompt}\""
+        echo -n " "
         read resp <"$tty"
         #  p1+5   
         #  p1-5   
@@ -235,7 +338,13 @@ while read cmd prompt; do
             (*) # the user entered a command, so do it
                 # doing the eval_it will parse *again*
                 eval_it # don't break -- we don't advance the program yet
+                # Perhaps this deleted the current instruction; if so
+                # we go around the outer loop again, to increment the ctr
+                if [[ $cmdidx -lt $saved_cmdidx ]]; then
+                    break
+                fi
             ;;
         esac
     done
-done<<<"$program"
+    cmdidx=$(( $cmdidx + 1 ))
+done
