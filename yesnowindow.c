@@ -11,6 +11,7 @@
 #include "buttons.h"
 #include "boxes.h"
 #include "textwindow.h"
+#include <string.h>
 #ifndef OLD_CURSES
 #include <ncurses.h>
 #else

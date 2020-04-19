@@ -21,6 +21,7 @@
 #include "tracksplit.h"
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #ifndef OLD_CURSES
 #include <ncurses.h>
 #else

@@ -42,7 +42,7 @@ finishmenu (int sig)
   exit (0);
 }
 
-void
+int
 main (void)
 {
   char startdir[250];
@@ -63,4 +63,5 @@ main (void)
   mainmenu (startdir);
 
   finishmenu (0);
+  return 0;
 }

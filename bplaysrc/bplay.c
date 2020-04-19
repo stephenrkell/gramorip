@@ -91,7 +91,7 @@ extern void initsems(int disks, int snds);
 extern void cleanupsems(void);
 
 
-void main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	
 	int recorder = 0;		/* 1 if recording, 0 else */
@@ -398,6 +398,7 @@ void main(int argc, char *argv[])
 	}
 
 	finish_curses(0);
+	exit(0);	/* Not reached, but keeps compiler happy. */
 }
 
 void Usage(void)

@@ -32,6 +32,7 @@
 #include "yesnowindow.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #ifndef OLD_CURSES
 #include <ncurses.h>
@@ -90,9 +91,9 @@ cond_median2_param_screen (parampointer_t parampointer)
 
   char *helplines[8] =
   {
-    " ^: less ticks detected.                v: not all of tick interpolated.       ",
-    " ^: bad following of dynamics.          v: less ticks detected.                ",
-    " ^: bad following of dynamics.          v: less ticks detected.                ",
+    " ^: fewer ticks detected.               v: not all of tick interpolated.       ",
+    " ^: bad following of dynamics.          v: fewer ticks detected.               ",
+    " ^: bad following of dynamics.          v: fewer ticks detected.               ",
     " ^: detected tick length too short      v: detected tick length longer.        ",
     " ^: only strong ticks detected.         v: music-ticks also filtered out.      ",
     " Discard changes.                                                              ",

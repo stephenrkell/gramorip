@@ -17,6 +17,7 @@
 #include "helpline.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #ifndef OLD_CURSES
 #include <ncurses.h>
