@@ -646,19 +646,25 @@ cond_median2_highpass (long offset, long offset_zero,
 
   /* Should be /64, but the signal is extremely soft, so divide by less to
      get more quantization levels (more accurate) */
-  sum.left /= 10;
-  sum.right /= 10;
+  sum.left /= 4;
+  sum.right /= 4;
 #endif
 
-  if (sum.left < 32767)
-    sample.left = sum.left;
-  else
+  if (sum.left > 32767)
     sample.left = 32767;
-
-  if (sum.right < 32767)
-    sample.right = sum.right;
+  else if (sum.left < -32768)
+    sample.left = -32768;
   else
+    sample.left = sum.left;
+
+
+  if (sum.right > 32767)
     sample.right = 32767;
+  else if (sum.right < -32768)
+    sample.right = -32768;
+  else 
+    sample.right = sum.right;
+
 
   return sample;
 }
@@ -762,6 +768,9 @@ cond_median2_gate (long offset, long offset_zero,
     b_t.left;
   if (i > 32767)
     i = 32767;
+  else if (i < -32768)
+    i = -32768;
+
   returnval.left = i;
 
   i = (labs (w_t.right - b_t.right) * 1000)
@@ -769,6 +778,8 @@ cond_median2_gate (long offset, long offset_zero,
     b_t.right;
   if (i > 32767)
     i = 32767;
+  else if (i < -32768)
+    i = -32768;
   returnval.right = i;
 
   return returnval;
