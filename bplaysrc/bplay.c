@@ -297,14 +297,14 @@ int main(int argc, char *argv[])
 			filetype = F_RAW;	/* Change to change default */
 		switch(filetype)
 		{
+			wavhead header;
+
 		case F_WAV:
 			/* Spit out header here... */
 #ifndef LP2CD
 			fprintf(stderr, "Writing MS WAV sound file");
 #endif
 			{
-				wavhead header;
-
 				char *riff = "RIFF";
 				char *wave = "WAVE";
 				char *fmt = "fmt ";
@@ -346,6 +346,25 @@ int main(int argc, char *argv[])
 			initsems(0, 1);
 
 			shmrec(thefd, bcount, 1);
+
+			/* Rewrite header with updated length fields now
+			 * that we know the true file size. Writing is done
+			 * in a separate process, so it's easiest to gather
+			 * the number of bytes written from fstat(). [dk]
+			 */
+			if (filetype == F_WAV &&
+			    lseek(thefd, 0, SEEK_SET) != -1) {
+				struct stat st;
+				if (fstat(thefd, &st) != -1) {
+					header.length = cpu_to_le32(
+						(u_int32_t) (st.st_size - 8));
+					header.data_length = cpu_to_le32(
+						(u_int32_t) (st.st_size -
+							sizeof(header)));
+					write(thefd, &header, sizeof(header));
+				}
+			}
+				
 			break;
 		case F_VOC:
 			/* Spit out header here... */
