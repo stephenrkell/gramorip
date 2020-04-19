@@ -219,7 +219,7 @@ can be processed. For example, ticks may be filtered out. If track \
 separation points are computed (previous option), separate audio files \
 will be generated, each containing one track.",
 
-    "This option is not implemented yet. You can use the `cdrecord' \
+    "This option is not implemented yet. You can use the `wodim' \
 or `xcdroast' program to create CDs from sound files on the harddisk.",
 
     "(Parts of) sound files can be played with this option."

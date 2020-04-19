@@ -217,19 +217,16 @@ Process the audio signal:
 
 Write an audio CD: 
  - This option is not yet implemented. There are some plans to program a
-    uniform user interface to the cdrecord(1) program here. You have to
+    uniform user interface to the wodim(1) program here. You have to
     use the bare program for this moment. Try something like
 
-    cdrecord -v speed=2 dev=0,2,0 -audio -pad track01.wav track02.wav ... 
+    wodim -v speed=2 dev=0,2,0 -audio -pad track01.wav track02.wav ... 
 
-    Actual information on cdrecord may be found on:
-    http://www.fokus.gmd.de/research/cc/glone/employees/
-                                     joerg.schilling/private/cdrecord.html
-
-    If you like a graphical front-end to write CD's, try the xcdroast
-    program:
-    http://www.fh-muenchen.de/rz/xcdroast
-    (Note: you may have to use the wav2cdr utility.)
+    Please check out the wodim package or the cdrkit-doc package for 
+    details.
+    
+    You always can use a graphical front-end to write CD's, like the 
+    xcdroast program. See the xcdroast package for details.
 
 Play an audio file: 
  - Make sure the PCM and Master volumes are set high enough, and your
