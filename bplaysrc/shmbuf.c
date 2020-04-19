@@ -443,7 +443,7 @@ printw(" %d",cbuff);
 	cleanupsems();
 
 #ifdef VUMETER
-	nodelay(stdscr, TRUE);
+	nodelay(stdscr, FALSE);
 
 	/* child has displayed informative data */
 	do
