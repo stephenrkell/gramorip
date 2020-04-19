@@ -50,7 +50,7 @@ $(PROG): $(DEPS)
 makebplay: yesnowindow.o boxes.o buttons.o textwindow.o errorwindow.o \
            clrscr.o secshms.o
 	$(MAKE) -C bplaysrc
-	-rm bplay_gramo brec_gramo
+	-rm -f bplay_gramo brec_gramo
 	cp $(COPY_A) bplaysrc/bplay ./bplay_gramo
 	ln -s bplay_gramo brec_gramo
 
