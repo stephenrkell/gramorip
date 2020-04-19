@@ -30,7 +30,7 @@ record_from_lp (char *startdir)
 
   def_prog_mode ();		/* save terminal state */
 
-  sprintf (shellcmd, "brec_gramo -S -s 44100 -b 16 -t 6000 -w %s",
+  sprintf (shellcmd, "brec_gramo -S -s 44100 -b 16 -t 6000 -w \"%s\"",
 	   filename);
   system (shellcmd);
 
