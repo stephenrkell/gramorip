@@ -14,6 +14,7 @@
 #include "signpr_wav.h"
 #include "signpr_cmf.h"
 #include "signpr_cmf2.h"
+#include "signpr_cmf3.h"
 #include "signpr_mean.h"
 #include "signpr_doubmed.h"
 #include "signpr_rms.h"
@@ -511,6 +512,13 @@ make_filterlist (scrollmenu_t * filtlist, int *filtnumbers,
   add_to_filterlist (filtlist,
 		     filtnumbers,
 		     helptexts,
+		     COND_MEDIAN3_FILTER,
+		     COND_MEDIAN3_NAME,
+		     COND_MEDIAN3_HELPTEXT);
+
+  add_to_filterlist (filtlist,
+		     filtnumbers,
+		     helptexts,
 		     EXPERIMENT_FILTER,
 		     EXPERIMENT_NAME,
 		     EXPERIMENT_HELPTEXT);
@@ -557,6 +565,10 @@ get_sample_from_filter (int filterno)
 
       case MONOIZE_FILTER:
 	return monoize_filter (parampointerarray[filterno]);
+	break;
+
+      case COND_MEDIAN3_FILTER:
+	return cond_median3_filter (parampointerarray[filterno]);
 	break;
 
       case EXPERIMENT_FILTER:
@@ -615,6 +627,10 @@ init_filters ()
 	init_monoize_filter (i, parampointerarray[i]);
 	break;
 
+      case COND_MEDIAN3_FILTER:
+	init_cond_median3_filter (i, parampointerarray[i]);
+	break;
+
       case EXPERIMENT_FILTER:
 	init_experiment_filter (i, parampointerarray[i]);
 	break;
@@ -671,6 +687,10 @@ delete_filters ()
 	delete_monoize_filter (parampointerarray[i]);
 	break;
 
+      case COND_MEDIAN3_FILTER:
+	delete_cond_median3_filter (parampointerarray[i]);
+	break;
+
       case EXPERIMENT_FILTER:
 	delete_experiment_filter (parampointerarray[i]);
 	break;
@@ -724,6 +744,10 @@ param_defaults (parampointer_t parampointer, int filtertype)
       monoize_param_defaults (parampointer);
       break;
 
+    case COND_MEDIAN3_FILTER:
+      cond_median3_param_defaults (parampointer);
+      break;
+
     case EXPERIMENT_FILTER:
       experiment_param_defaults (parampointer);
       break;
@@ -775,6 +799,10 @@ param_screen (parampointer_t parampointer, int filtertype)
 
     case MONOIZE_FILTER:
       monoize_param_screen (parampointer);
+      break;
+
+    case COND_MEDIAN3_FILTER:
+      cond_median3_param_screen (parampointer);
       break;
 
     case EXPERIMENT_FILTER:

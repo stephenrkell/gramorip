@@ -20,6 +20,10 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
+#ifdef linux
+#include <libgen.h>
+#endif
+
 #ifndef __FreeBSD__
 #include <sys/soundcard.h>
 #else
@@ -52,16 +56,6 @@ char *progname;
 int forked;
 
 /* Prototypes */
-
-#ifdef linux
-/* This is in libc, but not in the header files. -- but it IS in
-   Red Hat 5.0.... Libc6?
-   well i'd guess its not in the headers because its nonstandard, i.e.
-   (probably) only exists on linux...  -nox */
-#ifndef REDHAT50
-extern char *basename(char *name);
-#endif
-#endif
 
 void Usage(void);
 void ErrDie(char *err);
@@ -107,11 +101,14 @@ int main(int argc, char *argv[])
 	sndf_t filetype;		/* The file type */
 	int mods;			/* So user can override */
 	int optc;			/* For getopt */
+	char *tmp = NULL;		/* Do not clobber argv[0] */
 
 	init_curses();
 
 #ifdef linux
-	progname = basename(argv[0]);	/* For errors */
+	tmp = strdup(argv[0]);		/* POSIX basename may modify its arg */
+	progname = basename(tmp);	/* For errors */
+	free(tmp);
 #else
 	progname = strrchr(argv[0], '/');  /* Replacement for e.g. FreeBSD */
 	if (!progname || !*++progname)

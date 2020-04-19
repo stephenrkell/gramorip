@@ -22,6 +22,8 @@
 /* ----- SOURCE & READING -------------------------------------------------- */
 
 FILE *sourcefile;
+int num_read_samples_buffered = 0;
+sample_t readsamplebuffer[44100];
 
 int
 openwavsource (char *filename)
@@ -106,6 +108,7 @@ processed.");
     }
 
   /* Well, everything seems to be OK */
+  num_read_samples_buffered = 0;
   return 1;
 }
 
@@ -113,6 +116,7 @@ void
 closewavsource ()
 {
   fclose (sourcefile);
+  num_read_samples_buffered = 0; 
 }
 
 int
@@ -120,6 +124,9 @@ seeksamplesource (long samplenumber)
 /* returns 0: failure, 1: success */
 {
   struct stat buf;
+
+  /* throw away buffer on fseek */
+  num_read_samples_buffered = 0; 
 
   if (fstat (fileno (sourcefile), &buf))
     return 0;
@@ -135,22 +142,28 @@ seeksamplesource (long samplenumber)
 
 sample_t
 readsamplesource ()
-{
-  sample_t sample;
+{ 
+  /* millions of calls to fread sure slow things down.... buffer it a little */
+  static int i;
 
-  if (fread (&sample, 1, 4, sourcefile) != 4)
-    {
-      /* reading after end of file - this just happens when using
-         pre-read buffers! */
-      sample.left = 0;
-      sample.right = 0;
-    }
+  if (i >= num_read_samples_buffered)
+  {  
+    num_read_samples_buffered = fread(readsamplebuffer, 4, sizeof(readsamplebuffer)/4, sourcefile); 
+    i = 0; 
+    if (!num_read_samples_buffered)
+      {
+        /* reading after end of file - this just happens when using
+           pre-read buffers! */
+        readsamplebuffer[0].left = 0;
+        readsamplebuffer[0].right = 0;
+    	return readsamplebuffer[0];
+      }
+  }
 
 #ifdef SWAP_ENDIAN
-  sample = SwapSample (sample);
+  SWAPSAMPLEREF (readsamplebuffer+i);
 #endif
-
-  return sample;
+  return readsamplebuffer[i++];
 }
 
 
@@ -158,6 +171,8 @@ readsamplesource ()
 
 FILE *destfile;
 int destfileispipe;		/* remember open() - - -> close() */
+int num_write_samples_buffered = 0;
+sample_t writesamplebuffer[44100];
 
 int
 openwavdest (char *filename, long bcount)
@@ -216,12 +231,20 @@ openwavdest (char *filename, long bcount)
 
   fwrite (&header, sizeof (header), 1, destfile);
 
+  num_write_samples_buffered = 0;  /* just in case */
   return 1;
+}
+
+void flushwritebuffer()
+{ 
+	fwrite(writesamplebuffer, 4 * num_write_samples_buffered, 1, destfile); 
+	num_write_samples_buffered = 0;
 }
 
 void
 closewavdest ()
 {
+  flushwritebuffer(); 
   if (destfileispipe)
     pclose (destfile);
   else
@@ -233,8 +256,9 @@ writesampledest (sample_t sample)
 {
 
 #ifdef SWAP_ENDIAN
-  sample = SwapSample (sample);
+  SWAPSAMPLEREF(&sample);
 #endif
-
-  fwrite (&sample, 4, 1, destfile);
+  if (num_write_samples_buffered == (sizeof (writesamplebuffer) / 4))
+	flushwritebuffer(); 
+  writesamplebuffer[num_write_samples_buffered++] = sample;
 }

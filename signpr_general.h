@@ -13,6 +13,9 @@
 
 #include "scrollmenu.h"
 
+/* This has to be here, otherwise the FFT interpolating filter
+   can't keep its plans [SJT] */
+#include <rfftw.h>
 
 /* SAMPLES */
 
@@ -70,9 +73,12 @@ typedef struct
     signed short *sslist1;
     signed short *sslist2;
 
-    int int1;
+    int int1, int2;
     long long1;
     long long2;
+
+    rfftw_plan planf, planr;
+
   }
 param_t;
 
@@ -221,7 +227,12 @@ void param_screen (parampointer_t parampointer, int filtertype);
 #define MONOIZE_HELPTEXT        \
 "Average left & right signals."
 
-#define EXPERIMENT_FILTER	9
+#define COND_MEDIAN3_FILTER	9
+#define COND_MEDIAN3_NAME	"Conditional Median Filter IIF"
+#define COND_MEDIAN3_HELPTEXT	\
+"Remove ticks while not changing rest of signal - Using freq domain interp."
+
+#define EXPERIMENT_FILTER	10
 #define EXPERIMENT_NAME		"Experimenting Filter"
 #define EXPERIMENT_HELPTEXT	\
 "The filter YOU are experimenting with (in signpr_exper.c)"

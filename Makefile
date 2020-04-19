@@ -7,7 +7,8 @@ SRCS = boxes.c buttons.c checkfile.c dirfilemenu.c errorwindow.c 	\
         signpr_general.c signpr_median.c signpr_filtmenu.c signpr_wav.c	\
 	secshms.c playwav.c signpr_cmf.c signpr_mean.c signpr_doubmed.c	\
 	splashscr.c tracksplit.c tracksplit_filenm.c			\
-        tracksplit_parammenu.c signpr_cmf2.c signpr_rms.c signpr_copy.c	\
+        tracksplit_parammenu.c signpr_cmf2.c  signpr_cmf3.c             \
+	signpr_rms.c signpr_copy.c	\
         signpr_exper.c endian.c signpr_mono.c signpr_l1fit.c
 
 OBJS = $(SRCS:.c=.o)
@@ -21,19 +22,19 @@ LDFLAGS =
 # For Linux (and maybe others), use these:
 CFLAGS = -Wall -O2 -DTURBO_MEDIAN -DTURBO_BUFFER
 DEPS = $(OBJS) makebplay
-LIBS = -lncurses -lm
+LIBS = -lncurses -lrfftw -lfftw -lm
 COPY_A = -a
 
 # For FreeBSD (and maybe others), use these:
 #CFLAGS = -Wall -O2 -DTURBO_MEDIAN -DTURBO_BUFFER
 #DEPS = $(OBJS) makebplay
-#LIBS = -lncurses -lm
+#LIBS = -lncurses  -lrfftw -lfftw -lm
 #COPY_A = -p
 
 # For IRIX (and maybe others), use these:
 #CFLAGS = -Wall -O2 -DTURBO_MEDIAN -DTURBO_BUFFER -DSWAP_ENDIAN -DOLD_CURSES
 #DEPS = $(OBJS)
-#LIBS = -lcurses -lm
+#LIBS = -lcurses  -lrfftw -lfftw -lm
 #COPY_A = -a
 
 ##########
