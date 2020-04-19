@@ -1,98 +1,25 @@
 /* Determining Starts and Ends of Tracks
 
  * Copyright (C) 1998 J.A. Bezemer
+ * Made into a standalone tool by Stephen Kell
+ * Portions copyright (C) 2020 Stephen Kell
  *
  * Licensed under the terms of the GNU General Public License.
  * ABSOLUTELY NO WARRANTY.
  * See the file `COPYING' in this directory.
  */
-
-#include "tracksplit.h"
-#include "tracksplit_filenm.h"
-#include "tracksplit_parammenu.h"
 #include "signpr_wav.h"
 #include "fmtheaders.h"
 #include "secshms.h"
 #include "signpr_general.h"
-#include "errorwindow.h"
-#include "clrscr.h"
 
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
-#ifndef OLD_CURSES
-#include <ncurses.h>
-#else
-#include <curses.h>
-#endif
-
-
-int
-tracksplit_get_options (char *startdir, char *filename,
-			int *make_use_rms, int *make_graphs, long *blocklen,
-			int *global_silence_factor,
-			int *local_silence_threshold,
-			int *min_silence_blocks,
-			int *min_track_blocks, int *extra_blocks_start,
-			int *extra_blocks_end)
-/* Returns 0: Cancel, 1: OK */
-{
-  int currscreen = 0;
-  int options_ready = 0;
-  int returnval = 0;		/* 0: Cancel, 1: OK */
-
-  do
-    switch (currscreen)
-      {
-      case 0:
-	switch (tracksplit_select_file (startdir, filename))
-	  /* 0: Cancel, 
-	     1: PreviousScreen, 
-	     2: NextScreen/Start */
-	  {
-	  case 0:
-	    options_ready = 1;
-	    returnval = 0;
-	    break;
-	  case 2:
-	    currscreen = 1;
-	    break;
-	    /* default: currscreen+=0 */
-	  }
-	break;
-
-      case 1:
-	switch (tracksplit_parammenu (make_use_rms, make_graphs, blocklen,
-				      global_silence_factor,
-				      local_silence_threshold,
-				      min_silence_blocks,
-				      min_track_blocks, extra_blocks_start,
-				      extra_blocks_end))
-	  /* 0: Cancel, 
-	     1: PreviousScreen, 
-	     2: NextScreen/Start */
-	  {
-	  case 0:
-	    options_ready = 1;
-	    returnval = 0;
-	    break;
-	  case 1:
-	    currscreen = 0;
-	    break;
-	  case 2:
-	    returnval = 1;
-	    options_ready = 1;
-	    break;
-	    /* default: currscreen+=0 */
-	  }
-	break;
-      }
-  while (!options_ready);
-
-  return returnval;
-}
-
+#include <stddef.h> /* for offsetof, ... */
+#include <limits.h> /* for PATH_MAX */
+#include <err.h>
 
 void
 tracksplit_merge (short *typearray, long *startarray, long *endarray,
@@ -482,22 +409,47 @@ tracksplit_findtracks (double *medarray,	/* inputs */
   free (part_end);
 }
 
-
-void
-tracksplit_main (char *startdir)
+struct tracksplit_params
 {
-  char filename[250];
+  _Bool make_use_rms;
+  _Bool make_graphs;
+  long blocklen;  // "Enter a whole number, greater than 0. \ Default: 4410."
+  int global_silence_factor;  // "Enter a whole, positive number, preferably \less than 1000. Default: 150."
+  int local_silence_threshold;  // Enter a whole, positive number. Default: 5."
+  int min_silence_blocks; // ("Enter a whole, positive number. Default: 20."
+  int min_track_blocks;  // "Enter a whole, positive number. \ Default: 50."
+  int extra_blocks_start; // "Enter a whole, positive number. \ Default: 3."
+  int extra_blocks_end;  // "Enter a whole, positive number. \ Default: 12 (was 6)."
+} default_tracksplit_params = {
+  .make_use_rms = 1,
+  .make_graphs = 0,
+  .blocklen = 4410,
+  .global_silence_factor = 150,
+  .local_silence_threshold = 5,
+  .min_silence_blocks = 20,
+  .min_track_blocks = 50,
+  .extra_blocks_start = 3,
+  .extra_blocks_end = 12
+};
+/* NASTY but nice: use the field's byte offset as an index */
+const char *tracksplit_params_help[] = {
+#define FIELD(n) (offsetof(struct tracksplit_params, n))
+  [FIELD(make_use_rms)] = "Save results or use saved results of lengthy computation.",
+  [FIELD(make_graphs)] = "For manual (double-)checking/adjustment. Needs a few MB's.",
+  [FIELD(blocklen)] = "Number of samples to compute RMS of; 4410 = 0.1 sec.",
+  [FIELD(global_silence_factor)] = "The relative threshold during the initial search for tracks.",
+  [FIELD(local_silence_threshold)] = "Begin/end of track ...% above local (silence) power level.",
+  [FIELD(min_silence_blocks)] = "Shorter periods of silence not treated as track separation. ",
+  [FIELD(min_track_blocks)] = "Shorter tracks are ignored.",
+  [FIELD(extra_blocks_start)] = "Correction for fade-in effects that are hard to detect.",
+  [FIELD(extra_blocks_end)] = "Correction for fade-out effects that are hard to detect."
+#undef FIELD
+};
 
-  /* options menu defaults */
-  int make_use_rms = 1;
-  int make_graphs = 0;
-  long blocklen = 4410;
-  int global_silence_factor = 150;
-  int local_silence_threshold = 5;
-  int min_silence_blocks = 20;
-  int min_track_blocks = 50;
-  int extra_blocks_start = 3;
-  int extra_blocks_end = 6;
+int
+main (int argc, char **argv)
+{
+  struct tracksplit_params params = default_tracksplit_params;
 
   sample_t sample;
 
@@ -523,30 +475,22 @@ tracksplit_main (char *startdir)
   long trackstarts[100];
   long trackends[100];
   int detected_tracks;
-  char tempstring[250];
+  char tempstring[PATH_MAX];
   double global_silence_threshold;
   double min_poss_threshold, max_poss_threshold;
   int compute_rms_now;
   long templong;
   int in_ch;
 
-  filename[0] = '\0';
-
-  if (!tracksplit_get_options (startdir, filename,
-			       &make_use_rms, &make_graphs, &blocklen,
-			       &global_silence_factor,
-			       &local_silence_threshold, &min_silence_blocks,
-			       &min_track_blocks, &extra_blocks_start,
-			       &extra_blocks_end))
-    return;
-
-  clearscreen (TRACKSPLIT_COMPUTE_HEADERTEXT);
-  move (0, 79);
-  refresh ();
+  if (argc <= 1) 
+    {
+      errx(1, "No filename specified");
+    }
+  const char *filename = argv[1];
 
   compute_rms_now = 0;		/* Should we compute RMS? */
 
-  if (!make_use_rms)
+  if (!params.make_use_rms)
     compute_rms_now = 1;
 
   if (!compute_rms_now)		/* RMS must exist */
@@ -579,7 +523,7 @@ tracksplit_main (char *startdir)
 
   if (!compute_rms_now)		/* blocklen same? */
     {
-      if (templong != blocklen)
+      if (templong != params.blocklen)
 	{
 	  fclose (tempfile);
 	  compute_rms_now = 1;
@@ -618,23 +562,21 @@ tracksplit_main (char *startdir)
     {
       if (stat (filename, &buf))
 	{
-	  error_window ("Sound file could not be opened.");
-	  return;
+	  warn("Sound file could not be opened.");
+	  goto err_out;
 	}
 
       total_samples = (buf.st_size - sizeof (wavhead)) / (2 * 2);
 
-      total_blocks = (total_samples / blocklen) + 1;
+      total_blocks = (total_samples / params.blocklen) + 1;
 
-      if (!openwavsource (filename))
+      if (!openwavsource ((char*) filename))
 	{
-	  error_window ("Sound file could not be opened.");
-	  return;
+	  warn("Sound file could not be opened.");
+	  goto err_out;
 	}
 
-      error_window_display ("Computing signal power (RMS)...",
-			    " Cancel ");
-      nodelay (stdscr, TRUE);
+      warn("Computing signal power (RMS)...");
 
       rmsarray = (double *) malloc (total_blocks * sizeof (double));
 
@@ -643,18 +585,11 @@ tracksplit_main (char *startdir)
 
       while (total_samples_read < total_samples)
 	{
-	  if (!(current_block % 5))
-	    {
-	      mvprintw (ERROR_WINDOW_Y + 2, ERROR_WINDOW_X + 1,
-			"Done : %3d %%",
-			(int) (current_block * 100. / total_blocks));
-	      move (0, 79);
-	    }
 
 	  samples_read = 0;	/* Compute RMS */
 	  sum_left = 0;
 	  sum_right = 0;
-	  for (l = 0; l < blocklen; l++)
+	  for (l = 0; l < params.blocklen; l++)
 	    if (total_samples_read < total_samples)
 	      {
 		sample = readsamplesource ();
@@ -682,28 +617,17 @@ tracksplit_main (char *startdir)
 
 	  current_block++;
 
-	  in_ch = getch ();	/* Check for keypress */
-	  if (in_ch == 27 || in_ch == 13 || in_ch == KEY_ENTER)
-	    {
-	      reset_prog_mode ();
-	      nodelay (stdscr, FALSE);
-	      closewavsource ();
-	      return;
-	    }
 	}
 
       closewavsource ();
 
-      reset_prog_mode ();
-      nodelay (stdscr, FALSE);
-
-      if (make_use_rms)		/* Write .RMS if requested */
+      if (params.make_use_rms)		/* Write .RMS if requested */
 	{
 	  strcpy (tempstring, filename);
 	  strcat (tempstring, ".rms");
 	  tempfile = fopen (tempstring, "w");
 	  fprintf (tempfile, "GramoFile Binary RMS Data\n");
-	  fwrite (&blocklen, sizeof (long), 1, tempfile);
+	  fwrite (&params.blocklen, sizeof (long), 1, tempfile);
 	  fwrite (&total_blocks, sizeof (long), 1, tempfile);
 	  fwrite (rmsarray, sizeof (double), total_blocks, tempfile);
 	  fclose (tempfile);
@@ -774,7 +698,7 @@ tracksplit_main (char *startdir)
 
 
   min_poss_threshold = sortarray[10];
-  max_poss_threshold = sortarray[total_blocks / 2];
+  max_poss_threshold = sortarray[5 * total_blocks / 6];
 
 
 #define dontDISPLAY_SOME_THRESHOLDS
@@ -792,11 +716,11 @@ tracksplit_main (char *startdir)
       tracksplit_findtracks (medarray,
 			     total_blocks,
 			     global_silence_threshold,
-			     local_silence_threshold,
-			     min_silence_blocks,
-			     min_track_blocks,
-			     extra_blocks_start,
-			     extra_blocks_end,
+			     params.local_silence_threshold,
+			     params.min_silence_blocks,
+			     params.min_track_blocks,
+			     params.extra_blocks_start,
+			     params.extra_blocks_end,
 
 			     trackstarts,
 			     trackends,
@@ -808,7 +732,7 @@ tracksplit_main (char *startdir)
 
 
   global_silence_threshold = (max_poss_threshold - min_poss_threshold)
-    * (global_silence_factor / 1000.)
+    * (params.global_silence_factor / 1000.)
     + min_poss_threshold;
 
   /* fprintf(stderr, "New global threshold: %f\n\r",
@@ -817,11 +741,11 @@ tracksplit_main (char *startdir)
   tracksplit_findtracks (medarray,
 			 total_blocks,
 			 global_silence_threshold,
-			 local_silence_threshold,
-			 min_silence_blocks,
-			 min_track_blocks,
-			 extra_blocks_start,
-			 extra_blocks_end,
+			 params.local_silence_threshold,
+			 params.min_silence_blocks,
+			 params.min_track_blocks,
+			 params.extra_blocks_start,
+			 params.extra_blocks_end,
 
 			 trackstarts,
 			 trackends,
@@ -836,8 +760,8 @@ tracksplit_main (char *startdir)
   tempfile = fopen (tempstring, "w");
   if (tempfile == NULL)
     {
-      error_window ("The .tracks file could not be written.");
-      return;
+      warn("The .tracks file could not be written.");
+      goto err_out;
     }
   fprintf (tempfile, "\
 # GramoFile Tracks File\n\
@@ -852,15 +776,15 @@ tracksplit_main (char *startdir)
 # These values are not used (yet), but are included for reference /\n\
 # regeneration purposes.\n\
 ");
-  fprintf (tempfile, "Blocklen=%ld\n", blocklen);
+  fprintf (tempfile, "Blocklen=%ld\n", params.blocklen);
   fprintf (tempfile, "Global_silence_factor=%d\n",
-	   global_silence_factor);
+	   params.global_silence_factor);
   fprintf (tempfile, "Local_silence_factor=%d\n",
-	   local_silence_threshold);
-  fprintf (tempfile, "Min_silence_blocks=%d\n", min_silence_blocks);
-  fprintf (tempfile, "Min_track_blocks=%d\n", min_track_blocks);
-  fprintf (tempfile, "Extra_blocks_start=%d\n", extra_blocks_start);
-  fprintf (tempfile, "Extra_blocks_end=%d\n", extra_blocks_end);
+	   params.local_silence_threshold);
+  fprintf (tempfile, "Min_silence_blocks=%d\n", params.min_silence_blocks);
+  fprintf (tempfile, "Min_track_blocks=%d\n", params.min_track_blocks);
+  fprintf (tempfile, "Extra_blocks_start=%d\n", params.extra_blocks_start);
+  fprintf (tempfile, "Extra_blocks_end=%d\n", params.extra_blocks_end);
   fprintf (tempfile, "\
 \n\
 # Below are start/end times of tracks. These are used to create separate\n\
@@ -874,24 +798,28 @@ tracksplit_main (char *startdir)
   for (l = 0; l < detected_tracks; l++)
     {
       fsec2hmsf ((trackends[l] - trackstarts[l] + 1) *
-		 (double) blocklen / 44100.,
+		 (double) params.blocklen / 44100.,
 		 tempstring);
       fprintf (tempfile,
 	       "\n# Track %ld - blocks %ld to %ld - length: %s\n",
 	       l + 1, trackstarts[l], trackends[l], tempstring);
-      fsec2hmsf (trackstarts[l] * (double) blocklen / 44100.,
+      fsec2hmsf (trackstarts[l] * (double) params.blocklen / 44100.,
 		 tempstring);
       fprintf (tempfile, "Track%02ldstart=%s\n", l + 1, tempstring);
-      fsec2hmsf ((trackends[l] + 1) * (double) blocklen / 44100.,
+      fsec2hmsf ((trackends[l] + 1) * (double) params.blocklen / 44100.,
 		 tempstring);
       fprintf (tempfile, "Track%02ldend=%s\n", l + 1, tempstring);
     }
+  fsec2hmsf (total_blocks * (double) params.blocklen / 44100.,
+	     tempstring);
+  fprintf (tempfile, "Fileend=%s\n", tempstring);
+
 
   fprintf (tempfile, "\n");
   fclose (tempfile);
 
 
-  if (make_graphs)		/* Write graphs */
+  if (params.make_graphs)		/* Write graphs */
     {
       strcpy (tempstring, filename);
       strcat (tempstring, ".med");
@@ -923,13 +851,15 @@ tracksplit_main (char *startdir)
 
     }
 
-
-  sprintf (tempstring, "%d tracks have been detected. More information \
-is in the `.tracks' file.", detected_tracks);
-  error_window (tempstring);
-
-
+  warn("%d tracks have been detected. More information "
+      "is in the `.tracks' file.", detected_tracks);
+  int ret = 0;
+  goto success;
+err_out:
+  ret = 1;
+success:
   free (rmsarray);
   free (medarray);
   free (sortarray);
+  return ret;
 }
