@@ -696,7 +696,12 @@ main (int argc, char **argv)
 
   qsort2double (sortarray, total_blocks);	/* Sort meds. Fast! */
 
-
+  /* To allow for files with long stretches of silence (since
+   * my captures are done post-hoc from a 'sliding window' of
+   * audio from my turntable), choose the fifth sextile rather
+   * than half-way (which will be silent if half the file is
+   * silent... i.e. we assume the captured audio fills comfortably
+   * more than one-sixth of the file, but maybe less than half). */
   min_poss_threshold = sortarray[10];
   max_poss_threshold = sortarray[5 * total_blocks / 6];
 
