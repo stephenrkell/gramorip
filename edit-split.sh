@@ -164,8 +164,8 @@ drop_prog_instr () {
     fi
 }
 
-drop_tgt () {
-    real_tgt=${tgt:-${last_tgt}}
+drop_at () {
+    local to_drop=${1:-${tgt:-${last_tgt}}}
     # To drop a track, it means:
     # - shuffle the starts and ends of later tracks back 1
     # - delete any pending commands on the dropped track
@@ -173,7 +173,7 @@ drop_tgt () {
     # The command stuff may be easier if the commands
     # are kept in an array
     # and we have a "program counter" that is the next-to-execute array index
-    for n in `seq $(( $real_tgt + 1 )) $count`; do
+    for n in `seq $(( $to_drop + 1 )) $count`; do
         echo "We would shuffle back track $n by one"
         starts[$(($n - 1))]=${starts[$n]}
         ends[$(($n - 1))]=${ends[$n]}
@@ -188,14 +188,14 @@ drop_tgt () {
     while ! [[ $pos -eq $proglen ]]; do
         local cmd="${program_cmds[$pos]}"
         parse_into "$cmd" this_ins this_tgt this_dir this_arg
-        if [[ $this_tgt -eq $real_tgt ]]; then
+        if [[ $this_tgt -eq $to_drop ]]; then
             # we need to drop this instr
             echo "Dropping instruction: $cmd" 1>&2
             drop_prog_instr $pos
             # ... and go back to the start of the program
             pos=0
             continue
-        elif [[ $this_tgt -gt $real_tgt ]]; then
+        elif [[ $this_tgt -gt $to_drop ]]; then
             # all track#s greater than tgt are now one less
             echo "Rewriting instruction: $cmd" 1>&2
             program_cmds[$pos]="${this_ins}$(($this_tgt - 1))${this_dir}${this_arg}"
@@ -237,15 +237,35 @@ eval_it () {
         ('l') # visualize it
             echo "Doing viz" 1>&2
         ;;
-        ('m') # merge
-            echo "Doing merge" 1>&2
-        ;;
         ('s') # split
             echo "Doing split" 1>&2
         ;;
         ('d') # drop
             echo "Doing drop" 1>&2
-            drop_tgt
+            drop_at "$tgt"
+        ;;
+        ('m') # merge -- like drop, but remember+restore the dropped boundary
+            case "$dir" in
+                ('-')
+                    echo "Doing merge backwards of $tgt" 1>&2
+                    remembered_start="${starts[$(($tgt - 1))]}"
+                    drop_at $(( $tgt - 1 ))
+                    tgt=$(( $tgt - 1 ))
+                    starts[$tgt]="${remembered_start}"
+                    print_state
+                ;;
+                ('+')
+                    echo "Doing merge forwards of $tgt" 1>&2
+                    remembered_end="${ends[$(($tgt + 1))]}"
+                    drop_at $(( $tgt + 1 ))
+                    ends[$tgt]="${remembered_end}"
+                    print_state
+                ;;
+                (*)
+                    echo "Did not understand merge dir: $dir"
+                    false
+                ;;
+            esac
         ;;
         ('n') # nudge
             echo "Doing nudge" 1>&2
@@ -256,16 +276,22 @@ eval_it () {
             case "$dir" in
                 ('-')
                     new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
-                    if [[ "${starts[$(($tgt +1))]}" == "${ends[$tgt]}" ]]; then
+                    if [[ $(time_in_ms $(parse_time "${starts[$(($tgt +1))]}" ) ) -eq \
+                          $(time_in_ms $(parse_time "${ends[$tgt]}" ) ) ]]; then
                         starts[$(($tgt +1))]="$new_boundary"
+                    else
+                        echo "Not nudging the start of $(( $tgt + 1 )); discontinuity detected"
                     fi
                     ends[$tgt]="$new_boundary"
                     print_state
                 ;;
                 ('+')
                     new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + ($arg * 1000) )) )"
-                    if [[ "$ends{[$(($tgt -1))]}" == "${starts[$tgt]}" ]]; then
+                    if [[ $(time_in_ms $(parse_time "${ends[$(($tgt -1))]}" ) ) -eq \
+                          $(time_in_ms $(parse_time "${starts[$tgt]}" ) ) ]]; then
                         ends[$(($tgt -1))]="$new_boundary"
+                    else
+                        echo "Not nudging the end of $(( $tgt - 1 )); discontinuity detected"
                     fi
                     starts[$tgt]="$new_boundary"
                     print_state
