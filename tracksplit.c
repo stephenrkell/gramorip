@@ -424,12 +424,12 @@ struct tracksplit_params
   .make_use_rms = 1,
   .make_graphs = 0,
   .blocklen = 4410,
-  .global_silence_factor = 150,
+  .global_silence_factor = 200,
   .local_silence_threshold = 5,
-  .min_silence_blocks = 20,
+  .min_silence_blocks = 12,
   .min_track_blocks = 50,
-  .extra_blocks_start = 3,
-  .extra_blocks_end = 12
+  .extra_blocks_start = 4,
+  .extra_blocks_end = 8
 };
 /* NASTY but nice: use the field's byte offset as an index */
 const char *tracksplit_params_help[] = {
