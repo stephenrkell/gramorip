@@ -9,7 +9,7 @@ tty=`tty`
 
 parse_time () {
     # 0:09:24.300
-    echo "$1" | tr '.:' '\t'
+    echo "$1" | tr '.:[[:blank:]]' '\n' | sed -r 's/^0*([^0]+)$/\1/' | tr '\n' '\t'
 }
 
 print_time_ms () {
@@ -70,7 +70,7 @@ while read line; do
         ('[Tracks]') ;;
         ('') ;;
         (Track*)
-            num="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\1/;p}' )"
+            num="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\1/;p}' | sed 's/^0*//' )"
             which="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\2/;p}' )"
             time="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=(.*)/ {s//\3/;p}' )"
             case "$which" in
@@ -108,8 +108,10 @@ ends[$(($count))]="$fileend"
 
 print_state () {
     for n in `seq 1 $count`; do
-        echo "$n starts at ${starts[$n]}" 1>&2
-        echo "$n ends   at ${ends[$n]}" 1>&2
+        echo    "$n starts at ${starts[$n]}" 1>&2
+        echo -n "$n ends   at ${ends[$n]} " 1>&2
+        local length=$(( $(time_in_ms $(parse_time ${ends[$n]}) ) - $(time_in_ms $(parse_time ${starts[$n]}) ) ))
+        echo "(length: $(print_time_ms "$length"))" 1>&2
     done
 }
 print_state
@@ -216,7 +218,7 @@ eval_it () {
             false
         ;;
         ('p') # play the track
-            echo "Doing play" 1>&2
+            echo "Doing play ('q' to stop)" 1>&2
             case "$dir" in
                 ('-')
                     # play from end - Ns, for Ns
