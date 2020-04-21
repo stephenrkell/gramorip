@@ -2,6 +2,10 @@
 
 wav="$1"
 
+test -e "$wav".tracks || \
+  (echo "Did not found tracks file: ${wav}.tracks" 1>&2; false) || \
+  exit 1
+
 mplayer=${MPLAYER:-mplayer}
 mplayer_playback_opts=${MPLAYER_OPTS:-}
 
@@ -204,7 +208,6 @@ drop_at () {
     done
     count=$(( $count - 1 ))
     echo "We now have $count tracks"
-    print_state
 }
 
 eval_it () {
@@ -243,8 +246,13 @@ eval_it () {
         ('d') # drop
             echo "Doing drop" 1>&2
             drop_at "$tgt"
+            print_state
         ;;
-        ('m') # merge -- like drop, but remember+restore the dropped boundary
+        ('l') # list
+            print_state
+        ;;
+        ('m') # merge
+            # we impl this like drop, but remember+restore the dropped boundary
             case "$dir" in
                 ('-')
                     echo "Doing merge backwards of $tgt" 1>&2
