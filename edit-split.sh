@@ -13,7 +13,12 @@ tty=`tty`
 
 parse_time () {
     # 0:09:24.300
-    echo "$1" | tr '.:[[:blank:]]' '\n' | sed -r 's/^0*([^0]+)$/\1/' | tr '\n' '\t'
+    output="$( echo "$1" | tr '.:[[:blank:]]' '\n' | sed -r 's/^0*([^0]+)$/\1/' | tr '\n' '\t' )"
+    # now CHECK for sanity
+    read h m s ms <<<"$output"
+    (test -n "$h" && test -n "$m" && test -n "$s" && test -n "$ms") || \
+        echo "Couldn't parse time '$1': got hour $h min $m sec $s msec $ms" 1>&2
+    echo "$output"
 }
 
 print_time_ms () {
@@ -166,6 +171,21 @@ drop_prog_instr () {
         echo "cmdidx fixed up to $cmdidx" 1>&2
     fi
 }
+dup_prog_instr () {
+    local idx="$1"
+    local new_tgt="$2"
+    for n in `seq $proglen -1 $(( $idx + 1 ))`; do
+        program_cmds[$(( $n + 1 ))]="${program_cmds[$n]}"
+        program_prompts[$(( $n + 1 ))]="${program_prompts[$n]}"
+    done
+    program_cmds[$(( $idx + 1 ))]="$(echo "${program_cmds[$idx]}" | sed -r "s/([a-z])($idx)(\$|[-\+])/\1${new_tgt}\2/" )"
+    program_prompts[$(( $idx + 1 ))]="${program_prompts[$idx]}"
+    proglen=$(( $proglen + 1 ))
+    if [[ $cmdidx -gt $idx ]]; then
+        cmdidx=$(( $cmdidx + 1 ))
+        echo "cmdidx fixed up to $cmdidx" 1>&2
+    fi
+}
 
 drop_at () {
     local to_drop=${1:-${tgt:-${last_tgt}}}
@@ -195,7 +215,7 @@ drop_at () {
             # we need to drop this instr
             echo "Dropping instruction: $cmd" 1>&2
             drop_prog_instr $pos
-            # ... and go back to the start of the program
+            # ... and go back to the start of the program, so our pos is not out of whack
             pos=0
             continue
         elif [[ $this_tgt -gt $to_drop ]]; then
@@ -206,6 +226,48 @@ drop_at () {
         pos=$(( $pos + 1 ))
     done
     count=$(( $count - 1 ))
+    echo "We now have $count tracks"
+}
+
+dup_at () {
+    local to_dup=${1:-${tgt:-${last_tgt}}}
+    echo "DEBUG: duping $to_dup" 1>&2
+    # To duplicate a track, it means:
+    # - shuffle the starts and ends of later tracks forward 1
+    # - duplicate any pending commands on the dropped track,...
+    # - ... rewriting the
+    # - ... an track numbers in them are rewritten
+    for n in `seq $count -1 $(( $to_dup ))`; do
+        echo "We would shuffle forward track $n by one"
+        starts[$(($n + 1))]=${starts[$n]}
+        ends[$(($n + 1))]=${ends[$n]}
+    done
+    count=$(( $count + 1 ))
+    # Now rewrite the program so that
+    # - any command whose target is n, for n = tgt, is duplicated
+    # - any command whose target is n, for n > tgt, is renumbered
+    local pos=0
+    while ! [[ $pos -eq $proglen ]]; do
+        local cmd="${program_cmds[$pos]}"
+        parse_into "$cmd" this_ins this_tgt this_dir this_arg
+        if [[ $this_tgt -gt $to_dup ]]; then
+            # all track#s greater than tgt are now one more
+            echo "Rewriting instruction: $cmd" 1>&2
+            program_cmds[$pos]="${this_ins}$(($this_tgt - 1))${this_dir}${this_arg}"
+        fi
+        pos=$(( $pos + 1 ))
+    done
+    pos=0
+    while ! [[ $pos -eq $proglen ]]; do
+        if [[ $this_tgt -eq $to_dup ]]; then
+            # we need to duplicate this instr
+            echo "Duplicating-with-renum instruction: $cmd" 1>&2
+            dup_prog_instr $pos $(( $to_dup + 1 ))
+            # ... and bump up our pos, to avoid infinite loop duplicating same instr
+            pos=$(( $pos + 1 ))
+        fi
+        pos=$(( $pos + 1 ))
+    done
     echo "We now have $count tracks"
 }
 
@@ -236,11 +298,27 @@ eval_it () {
                 ;;
             esac
         ;;
-        ('l') # visualize it
-            echo "Doing viz" 1>&2
-        ;;
-        ('s') # split
-            echo "Doing split" 1>&2
+        ('c') # chop/cut
+            echo "Doing chop" 1>&2
+            dup_at "$tgt"
+            echo "DEBUG: after dup" 1>&2
+            print_state
+            echo "DEBUG: now fixing up start/end" 1>&2
+            case "$dir" in
+                ('-')
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
+                ;;
+                ('+')
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + ($arg * 1000) )) )"
+                ;;
+                (*)
+                    echo "Did not understand chop dir: $dir"
+                    false
+                ;;
+            esac
+            ends[$tgt]="$new_boundary"
+            starts[$(( $tgt + 1 ))]="$new_boundary"
+            print_state
         ;;
         ('d') # drop
             echo "Doing drop" 1>&2
@@ -283,8 +361,9 @@ eval_it () {
             case "$dir" in
                 ('-')
                     new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
-                    if [[ $(time_in_ms $(parse_time "${starts[$(($tgt +1))]}" ) ) -eq \
-                          $(time_in_ms $(parse_time "${ends[$tgt]}" ) ) ]]; then
+                    if [[ $tgt -lt $count ]] && \
+                       [[ $(time_in_ms $(parse_time "${starts[$(($tgt +1))]}" "starts $tgt + 1 neg" ) ) -eq \
+                          $(time_in_ms $(parse_time "${ends[$tgt]}" "ends $tgt neg" ) ) ]]; then
                         starts[$(($tgt +1))]="$new_boundary"
                     else
                         echo "Not nudging the start of $(( $tgt + 1 )); discontinuity detected"
@@ -293,8 +372,9 @@ eval_it () {
                     print_state
                 ;;
                 ('+')
-                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + ($arg * 1000) )) )"
-                    if [[ $(time_in_ms $(parse_time "${ends[$(($tgt -1))]}" ) ) -eq \
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) "starts $tgt pos") + ($arg * 1000) )) )"
+                    if [[ $tgt -gt 1 ]] && \
+                       [[ $(time_in_ms $(parse_time "${ends[$(($tgt -1))]}" ) ) -eq \
                           $(time_in_ms $(parse_time "${starts[$tgt]}" ) ) ]]; then
                         ends[$(($tgt -1))]="$new_boundary"
                     else
@@ -312,6 +392,13 @@ eval_it () {
         ('q') # quit
             echo "Doing quit" 1>&2
             exit 0
+        ;;
+        ('s')
+            echo "Saving to .tracks file" 1>&2
+            echo "FIXME: unimplemented" 1>&2
+        ;;
+        ('v') # visualize it
+            echo "Doing viz" 1>&2
         ;;
         ('w') # write out files
             echo "Doing write" 1>&2
