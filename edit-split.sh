@@ -9,6 +9,16 @@ test -e "$wav".tracks || \
 mplayer=${MPLAYER:-mplayer}
 mplayer_playback_opts=${MPLAYER_OPTS:-}
 
+# TODO: mplayer is not quite faithful in its seek/endpos times,
+# when sub-second precision is required... we can probably use
+# 'sox' instead
+
+# FIXME: no way to request less-than-1s increments in our commands.
+
+# FIXME: provide 'u' to update the .tracks file, commenting out
+# the existing lines Track... and Number_of_tracks= lines,
+# and appending our own.
+
 tty=`tty`
 
 parse_time () {
@@ -389,10 +399,6 @@ eval_it () {
                 ;;
             esac
         ;;
-        ('q') # quit
-            echo "Doing quit" 1>&2
-            exit 0
-        ;;
         ('s')
             echo "Saving to .tracks file" 1>&2
             echo "FIXME: unimplemented" 1>&2
@@ -408,6 +414,10 @@ eval_it () {
                     $(time_in_ms $(parse_time ${starts[$n]}) ) \
                     $(( $(time_in_ms $(parse_time ${ends[$n]}) ) - $(time_in_ms $(parse_time ${starts[$n]}) ) )) 
             done
+        ;;
+        ('x') # exit -- not 'quit' to avoid risk that a 'q' intended for mplayer will hit us
+            echo "Doing exit" 1>&2
+            exit 0
         ;;
         (*)
             echo "Did not understand command $cmd: $resp"
