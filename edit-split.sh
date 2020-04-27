@@ -9,16 +9,6 @@ test -e "$wav".tracks || \
 mplayer=${MPLAYER:-mplayer}
 mplayer_playback_opts=${MPLAYER_OPTS:-}
 
-# TODO: mplayer is not quite faithful in its seek/endpos times,
-# when sub-second precision is required... we can probably use
-# 'sox' instead
-
-# FIXME: no way to request less-than-1s increments in our commands.
-
-# FIXME: provide 'u' to update the .tracks file, commenting out
-# the existing lines Track... and Number_of_tracks= lines,
-# and appending our own.
-
 tty=`tty`
 
 parse_time () {
@@ -48,35 +38,47 @@ time_in_ms () {
     echo $(( ( $h * 60 * 60 * 1000 ) + ($m * 60 * 1000) + ($s * 1000) + $ms ))
 }
 
-ms_to_s () {
+ms_to_s_decimal () {
     input="$(cat)"
-    printf "%04d\n" "$input" | sed -r 's/([0-9])([0-9]{3})$/\1.\2/'
+    #printf "%04d\n" "$input" | sed -r 's/([0-9])([0-9]{3})$/\1.\2/'
+    echo "$input" | awk '{print $0 / 1000.0}'
+}
+s_decimal_to_ms () {
+    input="$(cat)"
+    echo "$input" | awk '{print $0 * 1000}'
+}
+
+sox_extract_wav_ms_start_duration () {
+    start_ms="$1"
+    duration_ms="$2"
+    sox "$wav" -t wav - trim $( echo $start_ms | ms_to_s_decimal ) \
+        $( echo $duration_ms | ms_to_s_decimal )
 }
 
 play_ms_start_duration () {
     start_ms="$1"
     duration_ms="$2"
-    #echo "Doing: " ${mplayer} -really-quiet -ss $( echo $start_ms | ms_to_s ) \
-    #  -endpos $( echo $duration_ms | ms_to_s ) \
-    #  "$wav" 1>&2
-    "${mplayer}" ${mplayer_playback_opts} -really-quiet -ss $( echo $start_ms | ms_to_s ) \
-      -endpos $( echo $duration_ms | ms_to_s ) \
-      "$wav" <"$tty"
+    #echo "Doing: "
+    #"${mplayer}" ${mplayer_playback_opts} -really-quiet -ss $( echo $start_ms | ms_to_s_decimal ) \
+    #  -endpos $( echo $duration_ms | ms_to_s_decimal ) \
+    #  "$wav" <"$tty"
+    #sox "$wav" - trim "$( echo "$start_ms" | ms_to_s_decimal )" "$( echo "$duration_ms" | ms_to_s_decimal )" \
+    #   "${mplayer}" ${mplayer_playback_opts} -really-quiet -
+    tmpfile="$(mktemp --suffix ".wav" )"
+    sox_extract_wav_ms_start_duration "$start_ms" "$duration_ms" >"$tmpfile"
+    #echo "tmpfile is $tmpfile" 1>&2
+    "${mplayer}" ${mplayer_playback_opts} -really-quiet \
+      "$tmpfile" <"$tty"
+# -ss $( echo $start_ms | ms_to_s_decimal ) \
+#      -endpos $( echo $duration_ms | ms_to_s_decimal ) \
+    rm -f "$tmpfile" 1>&2
 }
 
-# don't use MPLAYER in case it has conflicting '-ao' options
 save_ms_start_duration () {
     destfile="$1"
     start_ms="$2"
     duration_ms="$3"
-    echo "Doing: " mplayer -really-quiet -ss $( echo $start_ms | ms_to_s ) \
-      -ao pcm:file="$destfile" \
-      -endpos $( echo $duration_ms | ms_to_s ) \
-      "$wav" 1>&2
-    "$mplayer" -really-quiet -ss $( echo $start_ms | ms_to_s ) \
-      -ao pcm:file="$destfile" \
-      -endpos $( echo $duration_ms | ms_to_s ) \
-      "$wav" <"$tty"
+    sox_extract_wav_ms_start_duration "$start_ms" "$duration_ms" > "$destfile"
 }
 
 declare -a starts
@@ -111,6 +113,18 @@ while read line; do
         ;;
     esac
 done < "$wav".tracks
+
+save_state () {
+    # comment any uncommented track boundary/count lines
+    # (we leave Fileend alone)
+    tracksfile="${1:-"$wav".tracks}"
+	sed -ri '/^[^#]*(Track([0-9]+)(start|end)|Number_of_tracks)=/ s//# &/' "$tracksfile"
+    # append our actual state
+    (for n in `seq 1 $count`; do
+       printf "Track%02dstart=${starts[$n]}\n" "$n"
+       printf "Track%02dend=${ends[$n]}\n" "$n"
+    done; printf "Number_of_tracks=%d\n" "$count") >> "$tracksfile"
+}
 
 echo "Count is $count"
 
@@ -154,7 +168,7 @@ program="${program}${sep}w Writing the output .wav files; OK?"
 parse_into () {
     local input="$1"
     # echo "parsing: $input (into vars: $2 $3 $4 $5)" 1>&2
-    regex="([a-z])([0-9]+)?([-\+])?([0-9]+)?"
+    regex="([a-z])([0-9]+)?([-\+])?([0-9]+(\.[0-9]+)?)?"
     # FIXME: why does 'declare' not work here?
     eval "${2}='$( echo "$input" | sed -rn "/$regex/ {s//\1/;p}" )'"
     eval "${3}='$( echo "$input" | sed -rn "/$regex/ {s//\2/;p}" )'"
@@ -296,11 +310,11 @@ eval_it () {
             case "$dir" in
                 ('-')
                     # play from end - Ns, for Ns
-                    play_ms_start_duration $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) $(($arg * 1000))
+                    play_ms_start_duration $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - $(s_decimal_to_ms <<<${arg:-5}) )) $(s_decimal_to_ms<<<${arg:-5})
                 ;;
                 ('+')
                     # play from start, for Ns
-                    play_ms_start_duration $(time_in_ms $(parse_time ${starts[$tgt]}) ) $(($arg * 1000))
+                    play_ms_start_duration $(time_in_ms $(parse_time ${starts[$tgt]}) ) $(s_decimal_to_ms<<<${arg:-5})
                 ;;
                 (*)
                     echo "Did not understand play dir: $dir"
@@ -316,10 +330,10 @@ eval_it () {
             echo "DEBUG: now fixing up start/end" 1>&2
             case "$dir" in
                 ('-')
-                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - $(s_decimal_to_ms<<<${arg:-5}) )) )"
                 ;;
                 ('+')
-                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + ($arg * 1000) )) )"
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) ) + $(s_decimal_to_ms<<<${arg:-5}) )) )"
                 ;;
                 (*)
                     echo "Did not understand chop dir: $dir"
@@ -370,7 +384,7 @@ eval_it () {
             # i.e. also move the end of track N-1 forward 5s ONLY IF they are abutting
             case "$dir" in
                 ('-')
-                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - ($arg * 1000) )) )"
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${ends[$tgt]}) ) - $(s_decimal_to_ms<<<${arg:-5}) )) )"
                     if [[ $tgt -lt $count ]] && \
                        [[ $(time_in_ms $(parse_time "${starts[$(($tgt +1))]}" "starts $tgt + 1 neg" ) ) -eq \
                           $(time_in_ms $(parse_time "${ends[$tgt]}" "ends $tgt neg" ) ) ]]; then
@@ -382,7 +396,7 @@ eval_it () {
                     print_state
                 ;;
                 ('+')
-                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) "starts $tgt pos") + ($arg * 1000) )) )"
+                    new_boundary="$(print_time_ms $(( $(time_in_ms $(parse_time ${starts[$tgt]}) "starts $tgt pos") + $(s_decimal_to_ms<<<${arg:-5}) )) )"
                     if [[ $tgt -gt 1 ]] && \
                        [[ $(time_in_ms $(parse_time "${ends[$(($tgt -1))]}" ) ) -eq \
                           $(time_in_ms $(parse_time "${starts[$tgt]}" ) ) ]]; then
@@ -401,19 +415,21 @@ eval_it () {
         ;;
         ('s')
             echo "Saving to .tracks file" 1>&2
-            echo "FIXME: unimplemented" 1>&2
+            save_state
         ;;
         ('v') # visualize it
             echo "Doing viz" 1>&2
         ;;
         ('w') # write out files
-            echo "Doing write" 1>&2
             destdir="$( mktemp -d ./split-XXXXXX )" || (echo "Couldn't create output dir"; false) || exit 1
+            echo "Doing write to $destdir" 1>&2
             for n in `seq 1 $count`; do
                 save_ms_start_duration "${destdir}/track${n}.wav" \
                     $(time_in_ms $(parse_time ${starts[$n]}) ) \
                     $(( $(time_in_ms $(parse_time ${ends[$n]}) ) - $(time_in_ms $(parse_time ${starts[$n]}) ) )) 
             done
+            # save a copy of the tracks file
+            cp "$wav".tracks "$destdir"/disc.tracks && save_state "$destdir"/disc.tracks
         ;;
         ('x') # exit -- not 'quit' to avoid risk that a 'q' intended for mplayer will hit us
             echo "Doing exit" 1>&2
