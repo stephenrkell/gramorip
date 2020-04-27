@@ -426,7 +426,7 @@ struct tracksplit_params
   .blocklen = 4410,
   .global_silence_factor = 200,
   .local_silence_threshold = 5,
-  .min_silence_blocks = 12,
+  .min_silence_blocks = 8,
   .min_track_blocks = 50,
   .extra_blocks_start = 4,
   .extra_blocks_end = 8
