@@ -6,7 +6,9 @@ test -e "$wav".tracks || \
   (echo "Did not found tracks file: ${wav}.tracks" 1>&2; false) || \
   exit 1
 
-mplayer=${MPLAYER:-mplayer}
+# sometimes sox generates a WAV file that confuses mplayer's default (lavcpref)
+# demuxer... amazing really
+mplayer=${MPLAYER:-mplayer -really-quiet -demuxer lavf}
 mplayer_playback_opts=${MPLAYER_OPTS:-}
 
 tty=`tty`
@@ -51,6 +53,10 @@ s_decimal_to_ms () {
 sox_extract_wav_ms_start_duration () {
     start_ms="$1"
     duration_ms="$2"
+    if [[ -n "$TRACE_SOX" ]]; then
+        echo sox "$wav" -t wav - trim $( echo $start_ms | ms_to_s_decimal ) \
+            $( echo $duration_ms | ms_to_s_decimal ) 1>&2
+    fi
     sox "$wav" -t wav - trim $( echo $start_ms | ms_to_s_decimal ) \
         $( echo $duration_ms | ms_to_s_decimal )
 }
@@ -59,15 +65,15 @@ play_ms_start_duration () {
     start_ms="$1"
     duration_ms="$2"
     #echo "Doing: "
-    #"${mplayer}" ${mplayer_playback_opts} -really-quiet -ss $( echo $start_ms | ms_to_s_decimal ) \
+    #"${mplayer}" ${mplayer_playback_opts} -ss $( echo $start_ms | ms_to_s_decimal ) \
     #  -endpos $( echo $duration_ms | ms_to_s_decimal ) \
     #  "$wav" <"$tty"
     #sox "$wav" - trim "$( echo "$start_ms" | ms_to_s_decimal )" "$( echo "$duration_ms" | ms_to_s_decimal )" \
-    #   "${mplayer}" ${mplayer_playback_opts} -really-quiet -
+    #   "${mplayer}" ${mplayer_playback_opts} -
     tmpfile="$(mktemp --suffix ".wav" )"
     sox_extract_wav_ms_start_duration "$start_ms" "$duration_ms" >"$tmpfile"
     #echo "tmpfile is $tmpfile" 1>&2
-    "${mplayer}" ${mplayer_playback_opts} -really-quiet \
+    ${mplayer} ${mplayer_playback_opts} \
       "$tmpfile" <"$tty"
 # -ss $( echo $start_ms | ms_to_s_decimal ) \
 #      -endpos $( echo $duration_ms | ms_to_s_decimal ) \
@@ -168,12 +174,12 @@ program="${program}${sep}w Writing the output .wav files; OK?"
 parse_into () {
     local input="$1"
     # echo "parsing: $input (into vars: $2 $3 $4 $5)" 1>&2
-    regex="([a-z])([0-9]+)?([-\+])?([0-9]+(\.[0-9]+)?)?"
+    regex="([a-z])([0-9]+)?(([-\+])([-\+]?[0-9]+(\.[0-9]+)?)?)?"
     # FIXME: why does 'declare' not work here?
     eval "${2}='$( echo "$input" | sed -rn "/$regex/ {s//\1/;p}" )'"
     eval "${3}='$( echo "$input" | sed -rn "/$regex/ {s//\2/;p}" )'"
-    eval "${4}='$( echo "$input" | sed -rn "/$regex/ {s//\3/;p}" )'"
-    eval "${5}='$( echo "$input" | sed -rn "/$regex/ {s//\4/;p}" )'"
+    eval "${4}='$( echo "$input" | sed -rn "/$regex/ {s//\4/;p}" )'"
+    eval "${5}='$( echo "$input" | sed -rn "/$regex/ {s//\5/;p}" )'"
 }
 # "last target" is really "the current track", so initially 1
 last_tgt=1
@@ -436,7 +442,7 @@ eval_it () {
             exit 0
         ;;
         (*)
-            echo "Did not understand command $cmd: $resp"
+            echo "Did not understand command [$cmd]: $resp"
             false
         ;;
     esac
