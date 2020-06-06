@@ -1,5 +1,22 @@
 #!/bin/bash
 
+TEMP=`getopt -q -o n -n $(basename $0) -- "$@"`
+#echo "TEMP is $TEMP" 1>&2
+eval set -- "$TEMP"
+while true; do case "$1" in
+    (-n)
+        #echo "Setting no-bump" 1>&2
+        NO_BUMP=1
+        ;;
+    (--)
+        shift
+        break
+        ;;
+esac; shift || break
+done
+
+#echo "\$0 is $0" 1>&2
+#echo "\$1 is $1" 1>&2
 wav="$1"
 
 test -e "$wav".tracks || \
@@ -134,8 +151,9 @@ save_state () {
 
 echo "Count is $count"
 
+if [[ -z "$NO_BUMP" ]]; then
 if [[ $count -gt 1 ]]; then
-# HACK the ends to go up to the next 
+# hack the ends to go up to the next track's beginning
 for n in `seq 1 $(( $count - 1 ))`; do
     echo "Bumping the end of $n (${ends[$n]}) up to the start of $(($n + 1)) (${starts[$(($n + 1))]})" 1>&2
     ends[$n]="${starts[$(($n + 1))]}"
@@ -143,6 +161,7 @@ done
 fi
 echo "Bumping the end of $(($count)) (${ends[$(($count - 1))]}) up to the file end ($fileend)" 1>&2
 ends[$(($count))]="$fileend"
+fi
 
 print_state () {
     for n in `seq 1 $count`; do
@@ -162,9 +181,9 @@ for n in `seq 1 $count`; do
     fi
     # Prompts shouldn't mention tracks by name, as w don't try to rewrite them
     # when track numbers change. Instead we shell-expand them, so just say '$tgt'
-    program="${program}${sep}p${n}+5 Playing "'$tgt'" from start, 5s; OK?"
+    program="${program}${sep}p${n}+10 Playing "'$tgt'" from start, 10s; OK?"
     sep=$'\n'
-    program="${program}${sep}p${n}-5 Playing "'$tgt'" to end, 5s; OK?"
+    program="${program}${sep}p${n}-10 Playing "'$tgt'" to end, 10s; OK?"
 done
 program="${program}${sep}w Writing the output .wav files; OK?"
 
