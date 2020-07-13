@@ -1,35 +1,5 @@
 #!/bin/bash
 
-TEMP=`getopt -q -o n -n $(basename $0) -- "$@"`
-#echo "TEMP is $TEMP" 1>&2
-eval set -- "$TEMP"
-while true; do case "$1" in
-    (-n)
-        #echo "Setting no-bump" 1>&2
-        NO_BUMP=1
-        ;;
-    (--)
-        shift
-        break
-        ;;
-esac; shift || break
-done
-
-#echo "\$0 is $0" 1>&2
-#echo "\$1 is $1" 1>&2
-wav="$1"
-
-test -e "$wav".tracks || \
-  (echo "Did not found tracks file: ${wav}.tracks" 1>&2; false) || \
-  exit 1
-
-# sometimes sox generates a WAV file that confuses mplayer's default (lavcpref)
-# demuxer... amazing really
-mplayer=${MPLAYER:-mplayer -really-quiet -demuxer lavf}
-mplayer_playback_opts=${MPLAYER_OPTS:-}
-
-tty=`tty`
-
 parse_time () {
     # 0:09:24.300
     output="$( echo "$1" | tr '.:[[:blank:]]' '\n' | sed -r 's/^0*([^0]+)$/\1/' | tr '\n' '\t' )"
@@ -38,6 +8,24 @@ parse_time () {
     (test -n "$h" && test -n "$m" && test -n "$s" && test -n "$ms") || \
         echo "Couldn't parse time '$1': got hour $h min $m sec $s msec $ms" 1>&2
     echo "$output"
+}
+
+# parse the "helpful" terminal messages back into .tracks format
+highest_track_seen () {
+	highest=0
+    while read line; do
+        num="$( echo "$line" | sed -r 's/Track([0-9]+).*/\1/' )"
+        if [[ -n "$num" ]] && [[ "$num" -gt "$highest" ]]; then
+           highest="$num"
+        fi
+    done
+    echo "$highest"
+}
+
+info_to_tracks () {
+    tracks="$(sed -rn '/^([0-9]+) +((start|end)s) +at +([0-9:\.]+)( \(length:.*\))?/ {s//Track\1\3=\4 # \5/;p}')"
+    echo "$tracks"
+    echo -n 'Number_of_tracks='; echo "$tracks" | highest_track_seen
 }
 
 print_time_ms () {
@@ -104,39 +92,6 @@ save_ms_start_duration () {
     sox_extract_wav_ms_start_duration "$start_ms" "$duration_ms" > "$destfile"
 }
 
-declare -a starts
-declare -a ends
-
-while read line; do
-    case "$line" in
-        ('#'*) ;;
-        ('[Tracks]') ;;
-        ('') ;;
-        (Track*)
-            num="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\1/;p}' | sed 's/^0*//' )"
-            which="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\2/;p}' )"
-            time="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=(.*)/ {s//\3/;p}' )"
-            case "$which" in
-                (start)
-                    echo "$(($num)) starts at $time" 1>&2
-                    starts[$(($num))]="$time"
-                ;;
-                (end)
-                    echo "$(($num)) ends at $time" 1>&2
-                    ends[$(($num))]="$time"
-                ;;
-                (*) echo "Did not understand: $line" 1>&2; exit 1 ;;
-            esac
-        ;;
-        ('Number_of_tracks='*)
-            count="$( echo "$line" | sed 's/^Number_of_tracks=//' )"
-        ;;
-        ('Fileend='*)
-            fileend="$( echo "$line" | sed 's/^Fileend=//' )"
-        ;;
-    esac
-done < "$wav".tracks
-
 save_state () {
     # comment any uncommented track boundary/count lines
     # (we leave Fileend alone)
@@ -149,20 +104,6 @@ save_state () {
     done; printf "Number_of_tracks=%d\n" "$count") >> "$tracksfile"
 }
 
-echo "Count is $count"
-
-if [[ -z "$NO_BUMP" ]]; then
-if [[ $count -gt 1 ]]; then
-# hack the ends to go up to the next track's beginning
-for n in `seq 1 $(( $count - 1 ))`; do
-    echo "Bumping the end of $n (${ends[$n]}) up to the start of $(($n + 1)) (${starts[$(($n + 1))]})" 1>&2
-    ends[$n]="${starts[$(($n + 1))]}"
-done
-fi
-echo "Bumping the end of $(($count)) (${ends[$(($count - 1))]}) up to the file end ($fileend)" 1>&2
-ends[$(($count))]="$fileend"
-fi
-
 print_state () {
     for n in `seq 1 $count`; do
         echo    "$n starts at ${starts[$n]}" 1>&2
@@ -171,24 +112,6 @@ print_state () {
         echo "(length: $(print_time_ms "$length"))" 1>&2
     done
 }
-print_state
-
-for n in `seq 1 $count`; do
-    if [[ "$program" == "" ]]; then
-        sep=''
-    else
-        sep=$'\n'
-    fi
-    # Prompts shouldn't mention tracks by name, as w don't try to rewrite them
-    # when track numbers change. Instead we shell-expand them, so just say '$tgt'
-    program="${program}${sep}p${n}+10 Playing "'$tgt'" from start, 10s; OK?"
-    sep=$'\n'
-    program="${program}${sep}p${n}-10 Playing "'$tgt'" to end, 10s; OK?"
-done
-program="${program}${sep}w Writing the output .wav files; OK?"
-
-#echo "Program is:" 1>&2
-#echo "$program" 1>&2
 
 parse_into () {
     local input="$1"
@@ -200,8 +123,7 @@ parse_into () {
     eval "${4}='$( echo "$input" | sed -rn "/$regex/ {s//\4/;p}" )'"
     eval "${5}='$( echo "$input" | sed -rn "/$regex/ {s//\5/;p}" )'"
 }
-# "last target" is really "the current track", so initially 1
-last_tgt=1
+
 parse () {
     parse_into "$1" ins tgt dir arg
     # remember which track we're acting on
@@ -467,6 +389,110 @@ eval_it () {
     esac
 }
 
+
+
+# sometimes sox generates a WAV file that confuses mplayer's default (lavcpref)
+# demuxer... amazing really
+mplayer=${MPLAYER:-mplayer -really-quiet -demuxer lavf}
+mplayer_playback_opts=${MPLAYER_OPTS:-}
+
+tty=`tty`
+
+# allow us to be sourced, or run as a command...
+case "$(basename -- "$0")" in
+    (edit-split*)
+
+# parse the options etc
+TEMP=`getopt -q -o n -n $(basename $0) -- "$@"`
+#echo "TEMP is $TEMP" 1>&2
+eval set -- "$TEMP"
+while true; do case "$1" in
+    (-n)
+        #echo "Setting no-bump" 1>&2
+        NO_BUMP=1
+        ;;
+    (--)
+        shift
+        break
+        ;;
+esac; shift || break
+done
+
+#echo "\$0 is $0" 1>&2
+#echo "\$1 is $1" 1>&2
+wav="$1"
+
+test -e "$wav".tracks || \
+  (echo "Did not found tracks file: ${wav}.tracks" 1>&2; false) || \
+  exit 1
+
+declare -a starts
+declare -a ends
+
+while read line; do
+    case "$line" in
+        ('#'*) ;;
+        ('[Tracks]') ;;
+        ('') ;;
+        (Track*)
+            num="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\1/;p}' | sed 's/^0*//' )"
+            which="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=.*/ {s//\2/;p}' )"
+            time="$( echo "$line" | sed -rn '/Track([0-9]+)(start|end)=(.*)/ {s//\3/;p}' )"
+            case "$which" in
+                (start)
+                    echo "$(($num)) starts at $time" 1>&2
+                    starts[$(($num))]="$time"
+                ;;
+                (end)
+                    echo "$(($num)) ends at $time" 1>&2
+                    ends[$(($num))]="$time"
+                ;;
+                (*) echo "Did not understand: $line" 1>&2; exit 1 ;;
+            esac
+        ;;
+        ('Number_of_tracks='*)
+            count="$( echo "$line" | sed 's/^Number_of_tracks=//' )"
+        ;;
+        ('Fileend='*)
+            fileend="$( echo "$line" | sed 's/^Fileend=//' )"
+        ;;
+    esac
+done < "$wav".tracks
+echo "Count is $count"
+
+if [[ -z "$NO_BUMP" ]]; then
+if [[ $count -gt 1 ]]; then
+# hack the ends to go up to the next track's beginning
+for n in `seq 1 $(( $count - 1 ))`; do
+    echo "Bumping the end of $n (${ends[$n]}) up to the start of $(($n + 1)) (${starts[$(($n + 1))]})" 1>&2
+    ends[$n]="${starts[$(($n + 1))]}"
+done
+fi
+echo "Bumping the end of $(($count)) (${ends[$(($count - 1))]}) up to the file end ($fileend)" 1>&2
+ends[$(($count))]="$fileend"
+fi
+
+print_state
+
+# build the program
+for n in `seq 1 $count`; do
+    if [[ "$program" == "" ]]; then
+        sep=''
+    else
+        sep=$'\n'
+    fi
+    # Prompts shouldn't mention tracks by name, as w don't try to rewrite them
+    # when track numbers change. Instead we shell-expand them, so just say '$tgt'
+    program="${program}${sep}p${n}+10 Playing "'$tgt'" from start, 10s; OK?"
+    sep=$'\n'
+    program="${program}${sep}p${n}-10 Playing "'$tgt'" to end, 10s; OK?"
+done
+program="${program}${sep}w Writing the output .wav files; OK?"
+
+#echo "Program is:" 1>&2
+#echo "$program" 1>&2
+
+# turn the program into arrays
 declare -a program_cmds
 declare -a program_prompts
 proglen=0
@@ -475,6 +501,9 @@ while read cmd prompt; do
     program_prompts[$proglen]="$prompt"
     proglen=$(( $proglen + 1 ))
 done<<<"$program"
+
+# "last target" is really "the current track", so initially 1
+last_tgt=1
 
 cmdidx=0
 while true; do
@@ -521,3 +550,8 @@ while true; do
     done
     cmdidx=$(( $cmdidx + 1 ))
 done
+
+# if we're being sourced...
+;;
+(*) ;;
+esac
